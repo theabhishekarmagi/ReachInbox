@@ -533,6 +533,8 @@ function ComposePage({ user, onLogout }: { user: User; onLogout: () => Promise<v
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
+  const [inlineImages, setInlineImages] = useState<Array<{ id: string; name: string; previewUrl: string; size?: string }>>([]);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
 
   const attachmentInputRef = useRef<HTMLInputElement>(null);
@@ -613,21 +615,105 @@ function ComposePage({ user, onLogout }: { user: User; onLogout: () => Promise<v
     setAttachments((prev) => prev.filter((att) => att.id !== id));
   }
 
+  function removeInlineImage(id: string) {
+    setInlineImages((prev) => prev.filter((img) => img.id !== id));
+  }
+
+  function handleCanvasPaste(e: React.ClipboardEvent) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        e.preventDefault();
+        const file = items[i].getAsFile();
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const base64 = String(reader.result || '');
+            setInlineImages((prev) => [
+              ...prev,
+              {
+                id: Math.random().toString(36).substring(2, 9),
+                name: file.name || `Pasted Image ${prev.length + 1}.png`,
+                previewUrl: base64,
+                size: formatFileSize(file.size)
+              }
+            ]);
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+    }
+  }
+
+  function handleCanvasDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDraggingOver(false);
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader();
+      if (file.type.startsWith('image/')) {
+        reader.onload = () => {
+          const base64 = String(reader.result || '');
+          setInlineImages((prev) => [
+            ...prev,
+            {
+              id: Math.random().toString(36).substring(2, 9),
+              name: file.name || `Dropped Image ${prev.length + 1}.png`,
+              previewUrl: base64,
+              size: formatFileSize(file.size)
+            }
+          ]);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        // Non-image files dropped on canvas go to attachments
+        reader.onload = () => {
+          const base64 = String(reader.result || '');
+          setAttachments((prev) => [
+            ...prev,
+            {
+              id: Math.random().toString(36).substring(2, 9),
+              name: file.name,
+              size: formatFileSize(file.size),
+              type: file.type || 'application/octet-stream',
+              isImage: false,
+              previewUrl: '',
+              content: base64
+            }
+          ]);
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+  }
+
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     setError('');
 
-    if (!subject || !body || recipients.length === 0) {
-      setError('Please fill subject, body and at least one recipient.');
+    if (!subject || (!body.trim() && inlineImages.length === 0) || recipients.length === 0) {
+      setError('Please fill subject, message content, and at least one recipient.');
       return;
     }
 
     try {
       setSaving(true);
+      const inlineHtml = inlineImages
+        .map(
+          (img) =>
+            `<div style="margin: 16px 0;"><img src="${img.previewUrl}" alt="${img.name}" style="max-width: 100%; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);" /></div>`
+        )
+        .join('');
+      const combinedBody = body ? (inlineHtml ? `${body}\n\n${inlineHtml}` : body) : inlineHtml;
+
       await api.scheduleEmail({
         senderEmail: user.email,
         subject,
-        body,
+        body: combinedBody,
         recipients,
         startTime: new Date(startTime).toISOString(),
         delayMs: Number(delay),
@@ -672,7 +758,7 @@ function ComposePage({ user, onLogout }: { user: User; onLogout: () => Promise<v
               type="button"
               onClick={() => attachmentInputRef.current?.click()}
               className="flex items-center gap-1 border-none bg-transparent cursor-pointer p-1.5 rounded-full hover:bg-emerald-50 transition-colors text-gray-500 hover:text-brand-green"
-              title="Attach document or image"
+              title="Attach document or image as attachment"
             >
               <Paperclip className="w-5 h-5" />
               {attachments.length > 0 && (
@@ -828,8 +914,26 @@ function ComposePage({ user, onLogout }: { user: User; onLogout: () => Promise<v
           </div>
         </div>
 
-        {/* Rich Text Editor Card */}
-        <div className="mt-2 border border-gray-100 rounded-2xl bg-gray-50/50 p-3">
+        {/* Rich Text Editor Card (Canvas) */}
+        <div
+          className={`mt-2 border rounded-2xl bg-gray-50/50 p-3 relative transition-colors ${
+            isDraggingOver ? 'border-brand-green bg-emerald-50/40 ring-2 ring-brand-green/20' : 'border-gray-100'
+          }`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setIsDraggingOver(true);
+          }}
+          onDragLeave={() => setIsDraggingOver(false)}
+          onDrop={handleCanvasDrop}
+        >
+          {/* Drag Overlay Prompt */}
+          {isDraggingOver && (
+            <div className="absolute inset-0 bg-emerald-50/90 border-2 border-dashed border-brand-green rounded-2xl flex flex-col items-center justify-center text-brand-green font-medium text-sm z-30 pointer-events-none">
+              <ImageIcon className="w-8 h-8 mb-2 animate-bounce" />
+              <span>Drop image here to insert directly into canvas</span>
+            </div>
+          )}
+
           {/* Formatting Toolbar */}
           <div className="flex items-center gap-1 bg-white border border-gray-200/80 rounded-xl px-3 py-1.5 mb-2 shadow-xs flex-wrap">
             <button type="button" className="p-1 rounded text-gray-500 hover:text-gray-900 hover:bg-gray-100 border-none bg-transparent cursor-pointer">
@@ -880,16 +984,53 @@ function ComposePage({ user, onLogout }: { user: User; onLogout: () => Promise<v
             </button>
           </div>
 
-          {/* Text Area */}
+          {/* Text Area Canvas */}
           <textarea
-            className="w-full min-h-[300px] border-none outline-none bg-transparent p-2 text-sm text-gray-700 resize-y"
+            className="w-full min-h-[220px] border-none outline-none bg-transparent p-2 text-sm text-gray-700 resize-y font-sans leading-relaxed"
             value={body}
             onChange={(e) => setBody(e.target.value)}
-            placeholder="Type Your Reply..."
+            onPaste={handleCanvasPaste}
+            placeholder="Type Your Reply (or paste/drop images directly here)..."
           />
+
+          {/* Inline Images Rendered Directly Inside Canvas (Gmail style) */}
+          {inlineImages.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-dashed border-gray-200">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 mb-2">
+                <ImageIcon className="w-3.5 h-3.5 text-brand-green" />
+                <span>Inline Canvas Images ({inlineImages.length})</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                {inlineImages.map((img) => (
+                  <div
+                    key={img.id}
+                    className="relative group border border-gray-200 rounded-xl overflow-hidden bg-white shadow-xs hover:shadow-md transition-all"
+                  >
+                    <img
+                      src={img.previewUrl}
+                      alt={img.name}
+                      className="w-full h-32 object-cover"
+                    />
+                    <div className="p-2 flex items-center justify-between text-xs text-gray-700 bg-white border-t border-gray-100">
+                      <span className="truncate flex-1 font-medium">{img.name}</span>
+                      {img.size && <span className="text-[10px] text-gray-400 ml-1 shrink-0">{img.size}</span>}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeInlineImage(img.id)}
+                      className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/70 hover:bg-red-600 text-white flex items-center justify-center text-xs transition-colors border-none cursor-pointer shadow-xs"
+                      title="Remove image from canvas"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Uploaded Documents / Attachments Preview Below Textbox */}
+        {/* Uploaded Documents / Attachments Tray (Below Textbox) */}
         {attachments.length > 0 && (
           <div className="mt-4">
             <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
@@ -1195,9 +1336,16 @@ function MailDetailPage({ user, onLogout }: { user: User; onLogout: () => Promis
           </div>
         </div>
 
-        {/* Email Body Content (No mock text!) */}
-        <div className="pl-13 pr-4 py-2 min-h-[140px] text-sm text-gray-800 leading-relaxed font-sans whitespace-pre-wrap">
-          {email.body || '(No message content)'}
+        {/* Email Body Content (supports plain text and inline HTML images) */}
+        <div className="pl-13 pr-4 py-2 min-h-[140px] text-sm text-gray-800 leading-relaxed font-sans">
+          {email.body && (email.body.includes('<img') || email.body.includes('<div') || email.body.includes('<p') || email.body.includes('<br')) ? (
+            <div
+              className="prose max-w-none text-sm text-gray-800 leading-relaxed [&_img]:max-w-full [&_img]:rounded-xl [&_img]:my-3 [&_img]:shadow-xs"
+              dangerouslySetInnerHTML={{ __html: email.body }}
+            />
+          ) : (
+            <div className="whitespace-pre-wrap">{email.body || '(No message content)'}</div>
+          )}
         </div>
 
         {/* Error message if failed */}

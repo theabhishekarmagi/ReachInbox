@@ -30,11 +30,13 @@ export async function sendEmail(input: {
     };
   });
 
+  const isHtml = input.body.includes('<img') || input.body.includes('<div') || input.body.includes('<p') || input.body.includes('<br');
   const info = await transporter.sendMail({
     from: `"${env.SMTP_FROM_NAME}" <${input.senderEmail}>`,
     to: input.to,
     subject: input.subject,
-    text: input.body,
+    text: input.body.replace(/<[^>]*>?/gm, ''),
+    html: isHtml ? input.body : input.body.replace(/\n/g, '<br>'),
     attachments: mailAttachments
   });
 
