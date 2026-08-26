@@ -245,23 +245,29 @@ Create tables (`campaigns`, `email_jobs`, `email_events`) and extensions:
 npm run migrate
 ```
 
-### 4. Start Backend API Server
-Runs Express server with authentication, reconciliation, and scheduler endpoints on port `5001`:
+### 4. Start All Services (Single Command)
+You can start the **Backend API**, **BullMQ Worker**, and **Frontend** simultaneously in a single terminal with colored logs:
 ```bash
-npm run dev:api
+npm run dev
 ```
 
-### 5. Start BullMQ Worker
-In a **new terminal window**, start the BullMQ email dispatch worker:
-```bash
-npm run dev:worker
-```
+---
 
-### 6. Start Frontend App
-In a **new terminal window**, start the Vite React development server on port `3000`:
-```bash
-npm run dev:web
-```
+### Alternative: Start Services Individually (3 Terminals)
+If you prefer running services in separate windows for debugging:
+
+- **Terminal 1 (Backend API)**:
+  ```bash
+  npm run dev:api
+  ```
+- **Terminal 2 (BullMQ Worker)**:
+  ```bash
+  npm run dev:worker
+  ```
+- **Terminal 3 (Frontend)**:
+  ```bash
+  npm run dev:web
+  ```
 
 Open **[http://localhost:3000](http://localhost:3000)** in your browser.
 
